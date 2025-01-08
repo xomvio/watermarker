@@ -1,0 +1,14 @@
+[package]
+name = "watermarker"
+version = "0.1.0"
+edition = "2021"
+authors = ["xomvio <xomvio@proton.me>"]
+description = "Watermarker CLI tool for images"
+repository = "https://github.com/xomvio/watermarker"
+license = "GPL3"
+
+
+[dependencies]
+photon-rs = "0.3.2"
+tokio = { version = "1.26.0", features = ["full"] }
+#chrono = "0.4.23"
