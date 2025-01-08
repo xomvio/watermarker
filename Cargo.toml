@@ -3,7 +3,7 @@ name = "watermarker"
 version = "0.1.0"
 edition = "2021"
 authors = ["xomvio <xomvio@proton.me>"]
-description = "Watermarker CLI tool for images"
+description = "Watermarker is a CLI tool for adding watermark to images."
 repository = "https://github.com/xomvio/watermarker"
 license = "GPL3"
 

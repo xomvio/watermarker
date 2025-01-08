@@ -32,7 +32,7 @@ Arguments:
     let args = env::args().collect::<Vec<String>>();
 
     let mut env_index = 1;
-    let mut target_path = String::new();
+    let target_path;
     let watermark_path;
     
     match args.get(1) {
