@@ -1,6 +1,5 @@
-use photon_rs::{multiple::watermark, native::save_image};
-//use chrono;
-use std::env;
+use image::{save_buffer, imageops};
+use std::{fs, env};
 
     /// watermarker [--path <target_path>] <watermark_path> <image_path> [image_path]...
     ///
@@ -38,14 +37,13 @@ Arguments:
     match args.get(1) {
         Some(arg) => {
             if arg == "--path" {
-                target_path = String::from(args.get(env_index + 1).expect(&help).to_string() + "/");
+                target_path = args.get(env_index + 1).expect(&help).to_string() + "/";
                 watermark_path = args.get(env_index + 2).expect(&help).to_string();
                 env_index += 3;
             } else {
                 target_path = String::from("./output/");
                 watermark_path = arg.to_string();
                 env_index += 1;
-                //env_index += 2;
             }
         },
         None => {
@@ -55,23 +53,18 @@ Arguments:
     }
 
     //create output directory if it doesn't exist
-    std::fs::create_dir_all(&target_path).unwrap();
+    fs::create_dir_all(&target_path).unwrap();
 
-    //let mut timer = chrono::Local::now();
-    let watermark_img = photon_rs::native::open_image(&watermark_path).unwrap();
-    //println!("get watermark: {} ms", chrono::Local::now().timestamp_millis() - timer.timestamp_millis());
+    let watermark_img = image::open(&watermark_path).unwrap();
 
-    //println!("watermarking {} images", args.len() - env_index);
     for index in env_index..args.len() {
         let args_clone = args.clone();
         let watermark_img = watermark_img.clone();
         let target_path = target_path.clone();
-        //timer = chrono::Local::now();
         tokio::spawn(async move {
-            let mut img = photon_rs::native::open_image(&args_clone[index]).unwrap();
-            watermark(&mut img, &watermark_img, 0,0);
-            save_image(img, &(target_path.to_owned() + &args_clone[index])).unwrap();
-            //println!("watermarked {} in {} ms", args_clone[index], chrono::Local::now().timestamp_millis() - timer.timestamp_millis());
+            let mut img = image::open(&args_clone[index]).unwrap();
+            imageops::overlay(&mut img, &watermark_img, 0, 0);
+            save_buffer(&(target_path.to_owned() + &args_clone[index]), img.as_bytes(), img.width(), img.height(), img.color()).unwrap();
         });
     }
 }

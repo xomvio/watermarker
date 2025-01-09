@@ -9,6 +9,5 @@ license = "GPL3"
 
 
 [dependencies]
-photon-rs = "0.3.2"
 tokio = { version = "1.26.0", features = ["full"] }
-#chrono = "0.4.23"
+image = "0.24.6"
