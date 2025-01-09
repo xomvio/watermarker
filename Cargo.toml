@@ -9,5 +9,5 @@ license = "GPL3"
 
 
 [dependencies]
-tokio = { version = "1.26.0", features = ["full"] }
+tokio = { version = "1.26.0", features = ["rt", "rt-multi-thread", "macros"] }
 image = "0.24.6"
