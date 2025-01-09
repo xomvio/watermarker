@@ -1,6 +1,6 @@
 [package]
 name = "watermarker"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
 authors = ["xomvio <xomvio@proton.me>"]
 description = "Watermarker is a CLI tool for adding watermark to images."
