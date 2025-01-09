@@ -1,11 +1,11 @@
 [package]
 name = "watermarker"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
-authors = ["xomvio <xomvio@proton.me>"]
+authors = ["xomvio <xomvio at proton dot me>"]
 description = "Watermarker is a CLI tool for adding watermark to images."
 repository = "https://github.com/xomvio/watermarker"
-license = "GPL3"
+license = "GPL-3.0-or-later"
 
 
 [dependencies]
