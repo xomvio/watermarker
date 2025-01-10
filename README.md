@@ -4,7 +4,7 @@ Watermarker is a CLI tool for adding watermark to images.
 
 ## Usage:
 ```
-watermarker [--path <target_path>] [--target-resolution <width> <height>] [--filetype <filetype>] <watermark_path> <image_path> [image_path]...
+watermarker [--path <target_path>] [--res <width> <height>] [--filetype <filetype>] <watermark_path> <image_path> [image_path]...
 ```
 
 ## Arguments:
@@ -21,4 +21,9 @@ watermarker [--path <target_path>] [--target-resolution <width> <height>] [--fil
 watermarker watermark.png image1.jpg
 watermarker watermark.png image1.jpg image2.png
 watermarker --path ./target --res 300 500 --filetype jpg watermark.png image1.png image2.png image3.png
-```    
+```
+
+### Available on AUR:
+```
+paru -S watermarker
+```
