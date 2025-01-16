@@ -51,7 +51,7 @@ Arch Linux (AUR):
 paru -S watermarker
 ```
 Other:<br />
-You can compile yourself or directly download bin or exe from releases.
+You can compile yourself or directly download bin from releases. (exe won't work)
 
 ## Contributing
 
