@@ -1,14 +1,16 @@
 use image::{save_buffer, imageops};
 use std::{fs, env};
 
-
-    /// The main function of the program.
-    ///
-    /// This function parses command line arguments, creates output directory if it doesn't exist,
-    /// opens watermark image, and then for each image path provided:
-    /// opens the image, resizes it if width and height are provided, overlays the watermark,
-    /// and saves it to the output directory.
-    ///
+/// CLI tool for adding watermark to images.
+///
+/// It takes a watermark image and at least one image as command line arguments.
+/// It will apply the watermark to the specified image(s) and save the watermarked images in the specified output directory.
+///
+/// If `--path <target_path>` is specified, it will save the watermarked images in `<target_path>`.
+/// If `--res <width> <height>` is specified, it will resize the watermarked images to `<width> x <height>`.
+/// If `--filetype <filetype>` is specified, it will save the watermarked images with `<filetype>` as the file extension.
+///
+/// If no command line arguments are specified, it will print the help message and exit.
 #[tokio::main]
 async fn main() {
     let help: String = "
@@ -103,6 +105,47 @@ Examples:
     }
 }
 
+
+/// Processes the given path to apply a watermark.
+/// 
+/// # Arguments
+/// 
+/// * `path` - A string slice that holds the path to the file or directory to be processed.
+/// * `watermark_img` - The watermark image to be applied.
+/// * `target_path` - A string slice that holds the path where the watermarked images will be saved.
+/// * `target_resolution` - An optional tuple specifying the target resolution for the watermarked images.
+/// * `target_filetype` - An optional string specifying the target file type for the watermarked images.
+/// 
+/// If the path is a file, it applies the watermark directly to the file.
+/// If the path is a directory, it recursively processes all files and subdirectories within it.
+
+fn watermarker(path: String, watermark_img: image::DynamicImage, target_path: String, target_resolution: Option<(u32, u32)>, target_filetype: Option<String>) {
+    match fs::metadata(&path) {
+        Ok(metadata) => {
+
+            if metadata.is_file() {
+                watermark(path, watermark_img, target_path, target_resolution, target_filetype);
+            }
+            else if metadata.is_dir() {
+                watermark_dir(path, watermark_img, target_path, target_resolution, target_filetype);
+            }
+            else {
+                println!("failed to get metadata for: {}\r\nthis will be skipped", path);
+            }
+
+        },
+        Err(e) => {
+            println!("failed to get metadata for: {}: {}\r\nthis will be skipped.", path, e);
+        }
+    }
+}
+
+/// This function is called when a directory is found. It will process all files in this directory and all subdirectories.
+/// 
+/// It will create a directory with the same name as the one found in the target directory and save all watermarked images in
+/// this directory.
+/// It will call itself for each subdirectory, and call `watermark` for each file.
+/// This way it can process all files in the directory and all subdirectories.
 fn watermark_dir(path: String, watermark_img: image::DynamicImage, target_path: String, target_resolution: Option<(u32, u32)>, target_filetype: Option<String>) {
     println!("directory found, processing all files in this directory: {}", path);
     let dir_name = path.clone();
@@ -126,27 +169,19 @@ fn watermark_dir(path: String, watermark_img: image::DynamicImage, target_path: 
     }
 }
 
-fn watermarker(path: String, watermark_img: image::DynamicImage, target_path: String, target_resolution: Option<(u32, u32)>, target_filetype: Option<String>) {
-    match fs::metadata(&path) {
-        Ok(metadata) => {
 
-            if metadata.is_file() {
-                watermark(path, watermark_img, target_path, target_resolution, target_filetype);
-            }
-            else if metadata.is_dir() {
-                watermark_dir(path, watermark_img, target_path, target_resolution, target_filetype);
-            }
-            else {
-                println!("failed to get metadata for: {}\r\nthis will be skipped", path);
-            }
-
-        },
-        Err(e) => {
-            println!("failed to get metadata for: {}: {}\r\nthis will be skipped.", path, e);
-        }
-    }
-}
-
+    /// Applies a watermark to the given image.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - A string slice that holds the path to the image file.
+    /// * `watermark_img` - The watermark image to be applied.
+    /// * `target_path` - A string slice that holds the path where the watermarked images will be saved.
+    /// * `target_resolution` - An optional tuple specifying the target resolution for the watermarked images.
+    /// * `target_filetype` - An optional string specifying the target file type for the watermarked images.
+    ///
+    /// If the path is a file, it applies the watermark directly to the file.
+    /// If the path is a directory, it recursively processes all files and subdirectories within it.
 fn watermark(path: String, watermark_img: image::DynamicImage, target_path: String, target_resolution: Option<(u32, u32)>, target_filetype: Option<String>) {
     println!("watermarking: {}", path);
     // gets the filename from the path
