@@ -11,3 +11,4 @@ license = "GPL-3.0-or-later"
 [dependencies]
 tokio = { version = "1.26.0", features = ["rt", "rt-multi-thread", "macros"] }
 image = "0.24.6"
+clap = { version = "4.2.1", features = ["derive"] }

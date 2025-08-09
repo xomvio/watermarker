@@ -1,86 +1,45 @@
 use image::{save_buffer, imageops};
 use std::{fs, env};
+use clap::{self, Parser};
 
-/// CLI tool for adding watermark to images.
-///
-/// It takes a watermark image and at least one image as command line arguments.
-/// It will apply the watermark to the specified image(s) and save the watermarked images in the specified output directory.
-///
-/// If `--path <target_path>` is specified, it will save the watermarked images in `<target_path>`.
-/// If `--res <width> <height>` is specified, it will resize the watermarked images to `<width> x <height>`.
-/// If `--filetype <filetype>` is specified, it will save the watermarked images with `<filetype>` as the file extension.
-///
-/// If no command line arguments are specified, it will print the help message and exit.
+#[derive(clap::Parser)]
+#[clap(version = "0.2.4", author = "Xomvio <xomvio at proton dot me>")]
+struct Cli {
+    /// Path to the watermark image.
+    #[clap(value_parser)]
+    watermark_path: String,
+
+    /// Path(s) to the image(s) to be watermarked.
+    #[clap(value_parser)]
+    image_paths: Vec<String>,
+
+    /// Target directory to save watermarked images. Defaults to './output'.
+    #[clap(short, long, default_value = "./output/")]
+    target_path: String,
+
+    /// Target resolution for the watermarked images. reserves the aspect ratio. Defaults to the original resolution.
+    #[clap(long)]
+    width: Option<u32>,
+    #[clap(long)]
+    height: Option<u32>,
+
+    /// Target file type for the watermarked images. Defaults to the original file type.
+    #[clap(short, long)]
+    filetype: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
-    let help: String = "
-Usage:
-    watermarker [--path <target_path>] [--target-resolution <width> <height>] [--filetype <filetype>] <watermark_path> <image_path> [image_path]...
-
-Arguments:
-    --path <target_path>         (Optional) Target directory to save watermarked images. Defaults to './output'.
-    --res <width> <height>       (Optional) Target resolution for the watermarked images. reserves the aspect ratio. Defaults to the original resolution.
-    --filetype <filetype>        (Optional) Target file type for the watermarked images. Defaults to the original file type.
-    <watermark_path>             Path to the watermark image.
-    <image_path>                 Path(s) to the image(s) to be watermarked.
-
-Examples:
-    watermarker watermark.png image1.jpg
-    watermarker watermark.png image1.jpg image2.png
-    watermarker watermark.png /home/user/images/
-    watermarker --path ./target --res 300 500 --filetype jpg watermark.png image1.png image2.png image3.png
-".to_string();
-
-    let args = env::args().collect::<Vec<String>>();
-
-    // env_index is used to iterate through command line arguments
-    let mut env_index = 0;
-
-    // default values
-    let mut target_path=String::from("./output/");
-    let mut target_resolution: Option<(u32, u32)> = None;
-    let mut target_filetype: Option<String> = None;
-
-    // parse first command line arguments if any
-    loop {
-        env_index += 1;
-        match args.get(env_index) {
-            Some(arg) => {
-                if arg == "--path" { // change target path
-                    env_index += 1;
-                    target_path = args.get(env_index).expect("path is not specified.").to_string() + "/";
-                }
-                else if arg == "--res" { // change target resolution
-                    env_index += 2;
-                    target_resolution = Some((
-                        args.get(env_index - 1)
-                        .expect("width is not specified.")
-                        .parse().expect("invalid width."),
-                        args.get(env_index)
-                        .expect("height is not specified.")
-                        .parse().expect("invalid height."),
-                    ));
-                }
-                else if arg == "--filetype" { // change target file type
-                    env_index += 1;
-                    target_filetype = Some(".".to_string() + args.get(env_index).expect("filetype is not specified.").trim_start_matches('.'));
-                }
-                else {
-                    break
-                }
-            },
-            None => { // no command line arguments
-                println!("your need to provide a watermark and at least one image\r\n {}", help);
-                return;
-            }
-        }
-    }
+    let cli = Cli::parse();
+    let target_path = cli.target_path.trim_end_matches('/').to_string() + "/";
+    let watermark_path = cli.watermark_path.clone();
+    let image_paths = cli.image_paths.clone();
+    let width = cli.width;
+    let height = cli.height;
+    let filetype = cli.filetype.clone();
 
     // create output directory if it doesn't exist
     fs::create_dir_all(&target_path).expect("failed to create output directory");
-
-    let watermark_path = args.get(env_index).expect("watermark is not specified.").to_string();
-    env_index += 1;
 
     // open watermark
     let watermark_img = match image::open(&watermark_path) {
@@ -88,141 +47,133 @@ Examples:
         Err(e) => { println!("failed to open watermark image: {}", e); return }
     };
 
-    // let the tokio go wild
-    for path in args.iter().skip(env_index) {
+    let mut tasks = vec![];
 
-        // clone variables if necessary so they can be moved into the spawned thread
-        let path_clone = path.clone();
+    for image_path in image_paths {
+        // clone variables for the async task
         let watermark_img = watermark_img.clone();
         let target_path = target_path.clone();
-        let target_filetype = target_filetype.clone();
+        let width = width;
+        let height = height;
+        let filetype = filetype.clone();
 
-
-        // spawn a new thread
-        tokio::spawn(async move {
-            watermarker(path_clone, watermark_img, target_path, target_resolution, target_filetype);
+        // spawn a new task for each image to be watermarked        
+        let handle = tokio::spawn(async move {
+            watermarker(image_path, watermark_img, target_path, width, height, filetype).await;
         });
+        tasks.push(handle);
+    }
+    
+    // wait for all tasks to complete
+    for task in tasks {
+        if let Err(e) = task.await {
+            println!("Task failed: {}", e);
+        } 
     }
 }
 
-
-/// Processes the given path to apply a watermark.
-/// 
-/// # Arguments
-/// 
-/// * `path` - A string slice that holds the path to the file or directory to be processed.
-/// * `watermark_img` - The watermark image to be applied.
-/// * `target_path` - A string slice that holds the path where the watermarked images will be saved.
-/// * `target_resolution` - An optional tuple specifying the target resolution for the watermarked images.
-/// * `target_filetype` - An optional string specifying the target file type for the watermarked images.
-/// 
-/// If the path is a file, it applies the watermark directly to the file.
-/// If the path is a directory, it recursively processes all files and subdirectories within it.
-
-fn watermarker(path: String, watermark_img: image::DynamicImage, target_path: String, target_resolution: Option<(u32, u32)>, target_filetype: Option<String>) {
-    match fs::metadata(&path) {
+async fn watermarker(
+    image_path: String,
+    watermark_img: image::DynamicImage,
+    target_path: String,
+    width: Option<u32>,
+    height: Option<u32>,
+    filetype: Option<String>,
+) {
+    match fs::metadata(&image_path) {
         Ok(metadata) => {
-
             if metadata.is_file() {
-                watermark(path, watermark_img, target_path, target_resolution, target_filetype);
+                // apply watermark to the image file
+                let handle = tokio::spawn(async move {
+                    watermark(image_path, watermark_img, target_path, width, height, filetype);
+                });
+            } else if metadata.is_dir() {
+                watermark_dir(image_path, watermark_img, target_path, width, height, filetype);
+            } else {
+                println!("failed to get metadata for: {}\r\nthis will be skipped", image_path);
             }
-            else if metadata.is_dir() {
-                watermark_dir(path, watermark_img, target_path, target_resolution, target_filetype);
-            }
-            else {
-                println!("failed to get metadata for: {}\r\nthis will be skipped", path);
-            }
-
-        },
+        }
         Err(e) => {
-            println!("failed to get metadata for: {}: {}\r\nthis will be skipped.", path, e);
+            println!("failed to read metadata for {}: {}", image_path, e);
         }
     }
 }
 
-/// This function is called when a directory is found. It will process all files in this directory and all subdirectories.
-/// 
-/// It will create a directory with the same name as the one found in the target directory and save all watermarked images in
-/// this directory.
-/// It will call itself for each subdirectory, and call `watermark` for each file.
-/// This way it can process all files in the directory and all subdirectories.
-fn watermark_dir(path: String, watermark_img: image::DynamicImage, target_path: String, target_resolution: Option<(u32, u32)>, target_filetype: Option<String>) {
-    println!("directory found, processing all files in this directory: {}", path);
-    let dir_name = path.clone();
-    let dir_name = dir_name.split("/").last().expect("failed to get directory name");
-    fs::create_dir_all(target_path.to_owned() + dir_name + "/").expect("failed to create output directory");
-    for entry in fs::read_dir(&path).expect("failed to read directory") {
+/// Processes a directory to apply a watermark to all images within it.
+fn watermark_dir(
+    dir_path: String,
+    watermark_img: image::DynamicImage,
+    target_path: String,
+    width: Option<u32>,
+    height: Option<u32>,
+    filetype: Option<String>,
+) {
+    println!("Processing directory: {}", dir_path);
+
+    let dir_name = dir_path.split('/').last().unwrap_or("unknown");
+
+    fs::create_dir_all(&target_path).expect("failed to create output directory");
+
+    for entry in fs::read_dir(&dir_path).expect("failed to read directory") {
         match entry {
             Ok(entry) => {
                 let path = entry.path();
-                if path.is_file() {
-                    let path = path.to_str().expect("failed to get path").to_string();
-                    watermark(path, watermark_img.clone(), target_path.clone() + dir_name + "/", target_resolution, target_filetype.clone());
+                if !path.is_file() {
+                    continue; // skip non-file entries
                 }
-                else if path.is_dir() {
-                    let path = path.to_str().expect("failed to get path").to_string();
-                    watermark_dir(path, watermark_img.clone(), target_path.clone() + dir_name + "/", target_resolution, target_filetype.clone());
-                }
-            },
-            Err(e) => println!("failed to get entry for:{} {}\r\nthis will be skipped", path, e)
+                let path_str = path.to_str().expect("failed to convert path to string").to_string();
+
+                // clone variables for the async task
+                let path_clone = path_str.clone();
+                let watermark_img = watermark_img.clone();
+                let target_path = target_path.clone();
+                let target_filetype = filetype.clone();
+
+                // spawn a new task for each image to be watermarked
+                watermarker(path_clone, watermark_img, target_path, width, height, target_filetype);
+            }
+            Err(e) => {
+                println!("failed to read entry in directory {}: {}", dir_path, e);
+                continue;
+            }
         }
     }
 }
 
-
-    /// Applies a watermark to the given image.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - A string slice that holds the path to the image file.
-    /// * `watermark_img` - The watermark image to be applied.
-    /// * `target_path` - A string slice that holds the path where the watermarked images will be saved.
-    /// * `target_resolution` - An optional tuple specifying the target resolution for the watermarked images.
-    /// * `target_filetype` - An optional string specifying the target file type for the watermarked images.
-    ///
-    /// If the path is a file, it applies the watermark directly to the file.
-    /// If the path is a directory, it recursively processes all files and subdirectories within it.
-fn watermark(path: String, watermark_img: image::DynamicImage, target_path: String, target_resolution: Option<(u32, u32)>, target_filetype: Option<String>) {
-    println!("watermarking: {}", path);
-    // gets the filename from the path
-    // if target_filetype is set, we need to change the file type            
-    let filename = match target_filetype {
-        Some(filetype) => {
-            match path.split("/").last() {
-                Some(filename) => {
-                    match filename.split(".").next() {
-                        Some(filename) => filename.to_string() + &filetype,
-                        None => { println!("failed to get file type for: {}", path); return }
-                    }
-                },
-                None => { println!("failed to get filename from path: {}", path); return }
-            }
-        }
-        None => {
-            match path.split("/").last() {
-                Some(filename) => filename.to_string(),
-                None => { println!("failed to get filename from path: {}", path); return }
-            }
-        }
-    };
-
+/// Applies a watermark to a single image file.
+fn watermark(
+    image_path: String,
+    watermark_img: image::DynamicImage,
+    target_path: String,
+    width: Option<u32>,
+    height: Option<u32>,
+    filetype: Option<String>,
+) {
     // open image
-    let mut img = match image::open(&path) {
+    let mut img = match image::open(&image_path) {
         Ok(img) => img,
-        Err(e) => { println!("failed to open image: {}\r\nthis will be skipped", e); return }
+        Err(e) => { println!("failed to open image {}: {}", image_path, e); return }
     };
 
-    // resize image if target resolution is set
-    if let Some((width, height)) = target_resolution {
-        img = img.resize(width, height, image::imageops::Nearest);
+    // resize if width or height is specified
+    if width.is_some() || height.is_some() {
+        let width = width.unwrap_or(img.width());
+        let height = height.unwrap_or(img.height());
+        img = img.resize(width, height, imageops::FilterType::Nearest);
     }
 
-    // overlay watermark
+    // apply watermark
     imageops::overlay(&mut img, &watermark_img, 0, 0);
 
-    // save image
-    match save_buffer(&(target_path.to_owned() + &filename), img.as_bytes(), img.width(), img.height(), img.color()) {
-        Ok(_) => {},
-        Err(e) => { println!("failed to save '{}' this will be skipped. {}", filename, e); /*no 'return' here because function ends*/ }
+    // determine output file type
+    let ext = filetype.unwrap_or_else(|| {
+        image_path.split('.').last().unwrap_or("png").to_string()
+    });
+
+    // save the watermarked image
+    let output_path = format!("{}{}.{}", target_path, image_path.split('/').last().unwrap().split('.').next().unwrap(), ext);
+    match save_buffer(output_path.clone(), &img.as_bytes(), img.width(), img.height(), img.color()) {
+        Ok(_) => println!("Watermarked image saved to {}", output_path),
+        Err(e) => println!("Failed to save watermarked image: {}", e),
     }
 }
