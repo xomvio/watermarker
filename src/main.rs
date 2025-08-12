@@ -1,6 +1,5 @@
 use image::{save_buffer, imageops};
-use tokio::task::JoinHandle;
-use std::fs::{self, FileType};
+use std::fs;
 use clap::{self, Parser};
 
 #[derive(clap::Parser)]
@@ -88,7 +87,7 @@ async fn watermarker(
                     watermark(image_path, watermark_img, target_path, width, height, filetype);
                 });
             } else if metadata.is_dir() {
-                watermark_dir(image_path, watermark_img, target_path, width, height, filetype).await;
+                watermark_dir(image_path, watermark_img, target_path, width, height, filetype);
             } else {
                 println!("failed to get metadata for: {}\r\nthis will be skipped", image_path);
             }
@@ -100,7 +99,7 @@ async fn watermarker(
 }
 
 /// Processes a directory to apply a watermark to all images within it.
-async fn watermark_dir(
+fn watermark_dir(
     dir_path: String,
     watermark_img: image::DynamicImage,
     target_path: String,
@@ -130,7 +129,8 @@ async fn watermark_dir(
                 let target_filetype = filetype.clone();
 
                 // spawn a new task for each image to be watermarked
-                watermarker(path_clone, watermark_img, target_path, width, height, target_filetype).await;
+                let future = watermarker(path_clone, watermark_img, target_path, width, height, target_filetype);
+                tokio::spawn(future);
             }
             Err(e) => {
                 println!("failed to read entry in directory {}: {}", dir_path, e);
