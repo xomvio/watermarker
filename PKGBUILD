@@ -1,7 +1,7 @@
 # Maintainer: xomvio <xomvio at proton dot me>
 
 pkgname=watermarker
-pkgver=0.2.4
+pkgver=0.2.5
 pkgrel=1
 pkgdesc='CLI tool for adding watermark to images'
 url="https://github.com/xomvio/$pkgname"
