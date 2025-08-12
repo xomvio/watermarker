@@ -1,179 +1,251 @@
-use image::{save_buffer, imageops};
-use std::fs;
-use clap::{self, Parser};
+use anyhow::{Context, Result};
+use clap::Parser;
+use image::{imageops, DynamicImage, ImageFormat};
+use std::path::{Path, PathBuf};
+use tokio::fs;
 
-#[derive(clap::Parser)]
-#[clap(version = "0.2.4", author = "Xomvio <xomvio at proton dot me>")]
+#[derive(Parser)]
+#[command(version = "0.2.4", author = "xomvio <xomvio at proton dot me>")]
+#[command(about = "A CLI tool for adding watermarks to images")]
 struct Cli {
-    /// Path to the watermark image.
-    #[clap(value_parser)]
-    watermark_path: String,
+    /// Path to the watermark image
+    watermark_path: PathBuf,
 
-    /// Path(s) to the image(s) to be watermarked.
-    #[clap(value_parser)]
-    image_paths: Vec<String>,
+    /// Path(s) to the image(s) to be watermarked
+    image_paths: Vec<PathBuf>,
 
-    /// Target directory to save watermarked images. Defaults to './output'.
-    #[clap(short, long, default_value = "./output/")]
-    target_path: String,
+    /// Target directory to save watermarked images
+    #[arg(short, long, default_value = "./output")]
+    target_path: PathBuf,
 
-    /// Target resolution for the watermarked images. reserves the aspect ratio. Defaults to the original resolution.
-    #[clap(long)]
+    /// Target width for the watermarked images (preserves aspect ratio)
+    #[arg(long)]
     width: Option<u32>,
-    #[clap(long)]
+
+    /// Target height for the watermarked images (preserves aspect ratio)
+    #[arg(long)]
     height: Option<u32>,
 
-    /// Target file type for the watermarked images. Defaults to the original file type.
-    #[clap(short, long)]
-    filetype: Option<String>,
+    /// Target file format for the watermarked images
+    #[arg(short, long)]
+    format: Option<String>,
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let target_path = cli.target_path.trim_end_matches('/').to_string() + "/";
-    let watermark_path = cli.watermark_path.clone();
-    let image_paths = cli.image_paths.clone();
-    let width = cli.width;
-    let height = cli.height;
-    let filetype = cli.filetype.clone();
+    
+    let watermarker = Watermarker::new(
+        cli.watermark_path,
+        cli.target_path,
+        cli.width,
+        cli.height,
+        cli.format,
+    ).await?;
+    
+    watermarker.process_paths(cli.image_paths).await?;
+    
+    Ok(())
+}
 
-    // create output directory if it doesn't exist
-    fs::create_dir_all(&target_path).expect("failed to create output directory");
+struct Watermarker {
+    watermark: DynamicImage,
+    target_dir: PathBuf,
+    width: Option<u32>,
+    height: Option<u32>,
+    format: Option<ImageFormat>,
+}
 
-    // open watermark
-    let watermark_img = match image::open(&watermark_path) {
-        Ok(img) => img,
-        Err(e) => { println!("failed to open watermark image: {}", e); return }
-    };
-
-    let mut tasks = vec![];
-
-    for image_path in image_paths {
-        // clone variables for the async task
-        let watermark_img = watermark_img.clone();
-        let target_path = target_path.clone();
-        let filetype = filetype.clone();
-
-        // spawn a new task for each image to be watermarked        
-        let fut = tokio::spawn(async move {
-            watermarker(image_path, watermark_img, target_path, width, height, filetype).await 
-        });
-
-        tasks.push(fut);
+impl Watermarker {
+    async fn new(
+        watermark_path: PathBuf,
+        target_dir: PathBuf,
+        width: Option<u32>,
+        height: Option<u32>,
+        format: Option<String>,
+    ) -> Result<Self> {
+        fs::create_dir_all(&target_dir)
+            .await
+            .context("Failed to create output directory")?;
+            
+        let watermark = image::open(&watermark_path)
+            .context("Failed to open watermark image")?;
+            
+        let format = format.as_deref().map(Self::parse_format).transpose()?;
+        
+        Ok(Self {
+            watermark,
+            target_dir,
+            width,
+            height,
+            format,
+        })
     }
     
-    // wait for all tasks to complete
-    for task in tasks {
-        if let Err(e) = task.await {
-            println!("failed to join task: {}", e);
+    fn parse_format(format_str: &str) -> Result<ImageFormat> {
+        match format_str.to_lowercase().as_str() {
+            "png" => Ok(ImageFormat::Png),
+            "jpg" | "jpeg" => Ok(ImageFormat::Jpeg),
+            "webp" => Ok(ImageFormat::WebP),
+            "bmp" => Ok(ImageFormat::Bmp),
+            "tiff" => Ok(ImageFormat::Tiff),
+            _ => anyhow::bail!("Unsupported format: {}", format_str),
         }
     }
-}
-
-async fn watermarker(
-    image_path: String,
-    watermark_img: image::DynamicImage,
-    target_path: String,
-    width: Option<u32>,
-    height: Option<u32>,
-    filetype: Option<String>,
-) {
-    match fs::metadata(&image_path) {
-        Ok(metadata) => {
-            if metadata.is_file() {
-                // apply watermark to the image file
+    
+    async fn process_paths(&self, paths: Vec<PathBuf>) -> Result<()> {
+        let tasks: Vec<_> = paths
+            .into_iter()
+            .map(|path| {
+                let watermark = self.watermark.clone();
+                let target_dir = self.target_dir.clone();
+                let width = self.width;
+                let height = self.height;
+                let format = self.format;
+                
                 tokio::spawn(async move {
-                    watermark(image_path, watermark_img, target_path, width, height, filetype);
+                    Self::process_path(path, watermark, target_dir, width, height, format).await
+                })
+            })
+            .collect();
+            
+        for task in tasks {
+            if let Err(e) = task.await? {
+                eprintln!("Error processing image: {:#}", e);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn process_path(
+        path: PathBuf,
+        watermark: DynamicImage,
+        target_dir: PathBuf,
+        width: Option<u32>,
+        height: Option<u32>,
+        format: Option<ImageFormat>,
+    ) -> Result<()> {
+        let metadata = fs::metadata(&path)
+            .await
+            .with_context(|| format!("Failed to read metadata for {}", path.display()))?;
+            
+        if metadata.is_file() {
+            Self::process_image(path, watermark, target_dir, width, height, format).await
+        } else if metadata.is_dir() {
+            Self::process_directory(path, watermark, target_dir, width, height, format).await
+        } else {
+            anyhow::bail!("Path is neither file nor directory: {}", path.display())
+        }
+    }
+
+    async fn process_directory(
+        dir_path: PathBuf,
+        watermark: DynamicImage,
+        target_dir: PathBuf,
+        width: Option<u32>,
+        height: Option<u32>,
+        format: Option<ImageFormat>,
+    ) -> Result<()> {
+        println!("Processing directory: {}", dir_path.display());
+        
+        let mut entries = fs::read_dir(&dir_path)
+            .await
+            .with_context(|| format!("Failed to read directory {}", dir_path.display()))?;
+            
+        let mut tasks = Vec::new();
+        
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_file() {
+                let watermark = watermark.clone();
+                let target_dir = target_dir.clone();
+                
+                let task = tokio::spawn(async move {
+                    Self::process_image(path, watermark, target_dir, width, height, format).await
                 });
-            } else if metadata.is_dir() {
-                watermark_dir(image_path, watermark_img, target_path, width, height, filetype);
-            } else {
-                println!("failed to get metadata for: {}\r\nthis will be skipped", image_path);
+                
+                tasks.push(task);
             }
         }
-        Err(e) => {
-            println!("failed to read metadata for {}: {}", image_path, e);
-        }
-    }
-}
-
-/// Processes a directory to apply a watermark to all images within it.
-fn watermark_dir(
-    dir_path: String,
-    watermark_img: image::DynamicImage,
-    target_path: String,
-    width: Option<u32>,
-    height: Option<u32>,
-    filetype: Option<String>,
-) {
-    println!("Processing directory: {}", dir_path);
-
-    //let dir_name = dir_path.split('/').last().unwrap_or("unknown");
-
-    fs::create_dir_all(&target_path).expect("failed to create output directory");
-
-    for entry in fs::read_dir(&dir_path).expect("failed to read directory") {
-        match entry {
-            Ok(entry) => {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue; // skip non-file entries
-                }
-                let path_str = path.to_str().expect("failed to convert path to string").to_string();
-
-                // clone variables for the async task
-                let path_clone = path_str.clone();
-                let watermark_img = watermark_img.clone();
-                let target_path = target_path.clone();
-                let target_filetype = filetype.clone();
-
-                // spawn a new task for each image to be watermarked
-                let future = watermarker(path_clone, watermark_img, target_path, width, height, target_filetype);
-                tokio::spawn(future);
-            }
-            Err(e) => {
-                println!("failed to read entry in directory {}: {}", dir_path, e);
-                continue;
+        
+        for task in tasks {
+            if let Err(e) = task.await? {
+                eprintln!("Error processing image in directory: {:#}", e);
             }
         }
-    }
-}
-
-/// Applies a watermark to a single image file.
-fn watermark(
-    image_path: String,
-    watermark_img: image::DynamicImage,
-    target_path: String,
-    width: Option<u32>,
-    height: Option<u32>,
-    filetype: Option<String>,
-) {
-    // open image
-    let mut img = match image::open(&image_path) {
-        Ok(img) => img,
-        Err(e) => { println!("failed to open image {}: {}", image_path, e); return }
-    };
-
-    // resize if width or height is specified
-    if width.is_some() || height.is_some() {
-        let width = width.unwrap_or(img.width());
-        let height = height.unwrap_or(img.height());
-        img = img.resize(width, height, imageops::FilterType::Nearest);
+        
+        Ok(())
     }
 
-    // apply watermark
-    imageops::overlay(&mut img, &watermark_img, 0, 0);
-
-    // determine output file type
-    let ext = filetype.unwrap_or_else(|| {
-        image_path.split('.').next_back().unwrap_or("png").to_string()
-    });
-
-    // save the watermarked image
-    let output_path = format!("{}{}.{}", target_path, image_path.split('/').next_back().unwrap().split('.').next().unwrap(), ext);
-    match save_buffer(output_path.clone(), img.as_bytes(), img.width(), img.height(), img.color()) {
-        Ok(_) => println!("Watermarked image saved to {}", output_path),
-        Err(e) => println!("Failed to save watermarked image: {}", e),
+    async fn process_image(
+        image_path: PathBuf,
+        watermark: DynamicImage,
+        target_dir: PathBuf,
+        width: Option<u32>,
+        height: Option<u32>,
+        format: Option<ImageFormat>,
+    ) -> Result<()> {
+        let mut img = image::open(&image_path)
+            .with_context(|| format!("Failed to open image {}", image_path.display()))?;
+            
+        // Resize if dimensions are specified
+        if let (Some(w), Some(h)) = (width, height) {
+            img = img.resize_exact(w, h, imageops::FilterType::Lanczos3);
+        } else if let Some(w) = width {
+            let aspect_ratio = img.height() as f32 / img.width() as f32;
+            let h = (w as f32 * aspect_ratio) as u32;
+            img = img.resize_exact(w, h, imageops::FilterType::Lanczos3);
+        } else if let Some(h) = height {
+            let aspect_ratio = img.width() as f32 / img.height() as f32;
+            let w = (h as f32 * aspect_ratio) as u32;
+            img = img.resize_exact(w, h, imageops::FilterType::Lanczos3);
+        }
+        
+        // Apply watermark
+        imageops::overlay(&mut img, &watermark, 0, 0);
+        
+        // Determine output format and path
+        let output_format = format.unwrap_or_else(|| {
+            Self::detect_format(&image_path).unwrap_or(ImageFormat::Png)
+        });
+        
+        let file_stem = image_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .context("Invalid filename")?;
+            
+        let extension = Self::format_to_extension(output_format);
+        let output_path = target_dir.join(format!("{}.{}", file_stem, extension));
+        
+        img.save_with_format(&output_path, output_format)
+            .with_context(|| format!("Failed to save watermarked image to {}", output_path.display()))?;
+            
+        println!("✓ Watermarked image saved to {}", output_path.display());
+        Ok(())
+    }
+    
+    fn detect_format(path: &Path) -> Option<ImageFormat> {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .and_then(|ext| match ext.to_lowercase().as_str() {
+                "png" => Some(ImageFormat::Png),
+                "jpg" | "jpeg" => Some(ImageFormat::Jpeg),
+                "webp" => Some(ImageFormat::WebP),
+                "bmp" => Some(ImageFormat::Bmp),
+                "tiff" | "tif" => Some(ImageFormat::Tiff),
+                _ => None,
+            })
+    }
+    
+    fn format_to_extension(format: ImageFormat) -> &'static str {
+        match format {
+            ImageFormat::Png => "png",
+            ImageFormat::Jpeg => "jpg",
+            ImageFormat::WebP => "webp",
+            ImageFormat::Bmp => "bmp",
+            ImageFormat::Tiff => "tiff",
+            _ => "png",
+        }
     }
 }
