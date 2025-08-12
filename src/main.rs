@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 
 #[derive(Parser)]
-#[command(version = "0.2.4", author = "xomvio <xomvio at proton dot me>")]
+#[command(version = "0.3.0", author = "xomvio <xomvio at proton dot me>")]
 #[command(about = "A CLI tool for adding watermarks to images")]
 struct Cli {
     /// Path to the watermark image
