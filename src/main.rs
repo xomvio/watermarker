@@ -1,5 +1,6 @@
 use image::{save_buffer, imageops};
-use std::{fs, env};
+use tokio::task::JoinHandle;
+use std::fs::{self, FileType};
 use clap::{self, Parser};
 
 #[derive(clap::Parser)]
@@ -53,22 +54,21 @@ async fn main() {
         // clone variables for the async task
         let watermark_img = watermark_img.clone();
         let target_path = target_path.clone();
-        let width = width;
-        let height = height;
         let filetype = filetype.clone();
 
         // spawn a new task for each image to be watermarked        
-        let handle = tokio::spawn(async move {
-            watermarker(image_path, watermark_img, target_path, width, height, filetype).await;
+        let fut = tokio::spawn(async move {
+            watermarker(image_path, watermark_img, target_path, width, height, filetype).await 
         });
-        tasks.push(handle);
+
+        tasks.push(fut);
     }
     
     // wait for all tasks to complete
     for task in tasks {
         if let Err(e) = task.await {
-            println!("Task failed: {}", e);
-        } 
+            println!("failed to join task: {}", e);
+        }
     }
 }
 
@@ -84,11 +84,11 @@ async fn watermarker(
         Ok(metadata) => {
             if metadata.is_file() {
                 // apply watermark to the image file
-                let handle = tokio::spawn(async move {
+                tokio::spawn(async move {
                     watermark(image_path, watermark_img, target_path, width, height, filetype);
                 });
             } else if metadata.is_dir() {
-                watermark_dir(image_path, watermark_img, target_path, width, height, filetype);
+                watermark_dir(image_path, watermark_img, target_path, width, height, filetype).await;
             } else {
                 println!("failed to get metadata for: {}\r\nthis will be skipped", image_path);
             }
@@ -100,7 +100,7 @@ async fn watermarker(
 }
 
 /// Processes a directory to apply a watermark to all images within it.
-fn watermark_dir(
+async fn watermark_dir(
     dir_path: String,
     watermark_img: image::DynamicImage,
     target_path: String,
@@ -110,7 +110,7 @@ fn watermark_dir(
 ) {
     println!("Processing directory: {}", dir_path);
 
-    let dir_name = dir_path.split('/').last().unwrap_or("unknown");
+    //let dir_name = dir_path.split('/').last().unwrap_or("unknown");
 
     fs::create_dir_all(&target_path).expect("failed to create output directory");
 
@@ -130,7 +130,7 @@ fn watermark_dir(
                 let target_filetype = filetype.clone();
 
                 // spawn a new task for each image to be watermarked
-                watermarker(path_clone, watermark_img, target_path, width, height, target_filetype);
+                watermarker(path_clone, watermark_img, target_path, width, height, target_filetype).await;
             }
             Err(e) => {
                 println!("failed to read entry in directory {}: {}", dir_path, e);
@@ -167,12 +167,12 @@ fn watermark(
 
     // determine output file type
     let ext = filetype.unwrap_or_else(|| {
-        image_path.split('.').last().unwrap_or("png").to_string()
+        image_path.split('.').next_back().unwrap_or("png").to_string()
     });
 
     // save the watermarked image
-    let output_path = format!("{}{}.{}", target_path, image_path.split('/').last().unwrap().split('.').next().unwrap(), ext);
-    match save_buffer(output_path.clone(), &img.as_bytes(), img.width(), img.height(), img.color()) {
+    let output_path = format!("{}{}.{}", target_path, image_path.split('/').next_back().unwrap().split('.').next().unwrap(), ext);
+    match save_buffer(output_path.clone(), img.as_bytes(), img.width(), img.height(), img.color()) {
         Ok(_) => println!("Watermarked image saved to {}", output_path),
         Err(e) => println!("Failed to save watermarked image: {}", e),
     }
