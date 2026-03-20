@@ -1,86 +1,57 @@
-# 🖼️ Watermarker
+# watermarker
 
-CLI tool for adding watermarks to images, built with Rust.
+A fast, minimal CLI tool for batch image watermarking. written in Rust.
 
-## ✨ Features
+## Features
 
-- **Concurrent Processing**: Leverages async/await for batch processing
-- **Smart Resizing**: Preserves aspect ratios with high-quality Lanczos3 filtering
-- **Format Support**: PNG, JPEG, WebP, BMP, and TIFF formats
-- **Directory Processing**: Recursively processes entire image directories
-- **Robust Error Handling**: Graceful error recovery with detailed context
+- Concurrent processing via async/await — handles large batches efficiently
+- Recursive directory traversal
+- Output resizing with aspect-ratio preservation (Lanczos3)
+- Format conversion on output: PNG, JPEG, WebP, BMP, TIFF
+- Graceful error recovery. one failed image doesn't abort the batch
 
-## 🚀 Installation
+## Installation
 
-### From AUR (Arch Linux)
-```bash
+**AUR (Arch Linux)**
+```sh
 paru -S watermarker
 ```
 
-### From Source
-```bash
+**From source**
+```sh
 git clone https://github.com/xomvio/watermarker
 cd watermarker
 cargo build --release
 ```
 
-## 📖 Usage
+## Usage
 
-```bash
+```
 watermarker [OPTIONS] <WATERMARK_PATH> [IMAGE_PATHS]...
 ```
 
-### Arguments
-- `<WATERMARK_PATH>` - Path to the watermark image
-- `[IMAGE_PATHS]...` - Path(s) to image files or directories to be watermarked
+| Argument / Option | Description |
+|---|---|
+| `<WATERMARK_PATH>` | Path to the watermark image |
+| `[IMAGE_PATHS]...` | Image files or directories to process |
+| `-t, --target-path <PATH>` | Output directory (default: `./output`) |
+| `--width <WIDTH>` | Resize output to this width (preserves aspect ratio) |
+| `--height <HEIGHT>` | Resize output to this height (preserves aspect ratio) |
+| `-f, --format <FORMAT>` | Output format: `png` `jpg` `webp` `bmp` `tiff` |
 
-### Options
-- `-t, --target-path <PATH>` - Output directory (default: `./output`)
-- `--width <WIDTH>` - Target width in pixels (preserves aspect ratio)
-- `--height <HEIGHT>` - Target height in pixels (preserves aspect ratio)
-- `-f, --format <FORMAT>` - Output format: `png`, `jpg`, `webp`, `bmp`, `tiff`
-- `-h, --help` - Show help information
-- `-V, --version` - Show version information
+## Examples
 
-## 📝 Examples
-
-### Basic Usage
-```bash
-# Watermark a single image
+```sh
+# Single image
 watermarker watermark.png photo.jpg
 
-# Watermark multiple images
-watermarker watermark.png photo1.jpg photo2.png photo3.webp
-```
-
-### Advanced Usage
-```bash
-# Process entire directory with custom output location
+# Entire directory, custom output path
 watermarker -t ./watermarked watermark.png ./photos/
 
-# Resize and convert format while watermarking
-watermarker --width 1920 --format png watermark.png image.jpg
-
-# Batch process with specific dimensions
-watermarker -t ./output --width 800 --height 600 watermark.png ./images/
+# Resize and convert format
+watermarker --width 1920 --format webp watermark.png ./photos/
 ```
 
-## 🎯 Supported Formats
+## License
 
-| Format | Input | Output | Extension |
-|--------|-------|--------|-----------|
-| PNG    | ✅    | ✅     | `.png`    |
-| JPEG   | ✅    | ✅     | `.jpg`, `.jpeg` |
-| WebP   | ✅    | ✅     | `.webp`   |
-| BMP    | ✅    | ✅     | `.bmp`    |
-| TIFF   | ✅    | ✅     | `.tiff`, `.tif` |
-
-## ⚡ Performance
-
-- **Concurrent Processing**: Processes multiple images simultaneously
-- **High-Quality Scaling**: Uses Lanczos3 algorithm for high image quality
-- **Async I/O**: Non-blocking file operations for maximum throughput
-
-## 📄 License
-
-This project is licensed under the GPL-3.0-or-later License.
+GPL-3.0-or-later
